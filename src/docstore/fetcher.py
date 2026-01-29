@@ -1,5 +1,6 @@
 """Fetch package metadata from PyPI and locate documentation sources."""
 
+import base64
 import re
 import shutil
 import subprocess
@@ -315,9 +316,9 @@ class PyPIFetcher:
             except subprocess.TimeoutExpired:
                 console.print(
                     f"[yellow]Warning: Git clone timed out for {repo_url}[/yellow]\n"
-                    f"[dim]  Will fall back to PyPI description[/dim]"
+                    f"[dim]  Trying GitHub API fallback...[/dim]"
                 )
-                return []
+                return await self._fetch_github_docs_via_api(repo_url, output_dir)
             except subprocess.CalledProcessError as e:
                 stderr = e.stderr.decode() if e.stderr else ""
                 if "not found" in stderr.lower() or "404" in stderr:
@@ -325,27 +326,126 @@ class PyPIFetcher:
                         f"[yellow]Warning: Repository not found: {repo_url}[/yellow]\n"
                         f"[dim]  Will fall back to PyPI description[/dim]"
                     )
+                    # Don't try API for non-existent repos
+                    return []
                 elif "permission denied" in stderr.lower() or "authentication" in stderr.lower():
                     console.print(
                         f"[yellow]Warning: No access to repository: {repo_url}[/yellow]\n"
                         f"[dim]  Repository may be private. Will fall back to PyPI description[/dim]"
                     )
+                    # Don't try API for private repos without token
+                    return []
                 else:
                     console.print(
                         f"[yellow]Warning: Could not clone {repo_url}[/yellow]\n"
                         f"[dim]  {stderr.strip() if stderr else 'Unknown git error'}[/dim]\n"
-                        f"[dim]  Will fall back to PyPI description[/dim]"
+                        f"[dim]  Trying GitHub API fallback...[/dim]"
                     )
-                return []
+                    return await self._fetch_github_docs_via_api(repo_url, output_dir)
             except Exception as e:
                 console.print(
                     f"[yellow]Warning: Unexpected error cloning {repo_url}: {e}[/yellow]\n"
-                    f"[dim]  Will fall back to PyPI description[/dim]"
+                    f"[dim]  Trying GitHub API fallback...[/dim]"
                 )
-                return []
+                return await self._fetch_github_docs_via_api(repo_url, output_dir)
 
         # Collect all doc files
         return self._collect_doc_files(output_dir)
+
+    async def _fetch_github_docs_via_api(self, repo_url: str, output_dir: Path) -> list[Path]:
+        """
+        Fetch docs via GitHub API when git clone fails.
+
+        Uses the Contents API to recursively download documentation files.
+        Respects rate limits and optionally uses github_token for higher limits.
+        """
+        if "github.com" not in repo_url:
+            return []
+
+        # Parse owner/repo from URL
+        parts = urlparse(repo_url).path.strip("/").split("/")
+        if len(parts) < 2:
+            return []
+
+        owner, repo = parts[:2]
+        console.print(f"[blue]Trying GitHub API fallback for {owner}/{repo}...[/blue]")
+
+        # Set up headers with optional auth token
+        headers = {"Accept": "application/vnd.github.v3+json"}
+        if settings.github_token:
+            headers["Authorization"] = f"token {settings.github_token}"
+
+        docs_folders = ["docs", "doc", "documentation"]
+        api_base = "https://api.github.com"
+
+        async def fetch_directory(path: str, local_dir: Path) -> int:
+            """Recursively fetch a directory, returns count of files downloaded."""
+            url = f"{api_base}/repos/{owner}/{repo}/contents/{path}"
+            try:
+                response = await self._get_with_retry(url, headers=headers)
+                if response.status_code == 404:
+                    return 0
+                if response.status_code == 403:
+                    # Rate limited
+                    console.print("[yellow]GitHub API rate limit reached[/yellow]")
+                    return 0
+                if response.status_code != 200:
+                    return 0
+
+                items = response.json()
+                if not isinstance(items, list):
+                    return 0
+
+                file_count = 0
+                for item in items:
+                    item_path = local_dir / item["name"]
+                    if item["type"] == "dir":
+                        item_path.mkdir(parents=True, exist_ok=True)
+                        file_count += await fetch_directory(item["path"], item_path)
+                    elif item["type"] == "file":
+                        # Only fetch documentation files
+                        ext = Path(item["name"]).suffix.lower()
+                        if ext in {".md", ".rst", ".txt", ".html"}:
+                            content = await self._fetch_github_file(item["download_url"], headers)
+                            if content:
+                                item_path.write_text(content)
+                                file_count += 1
+                return file_count
+            except Exception as e:
+                console.print(f"[yellow]GitHub API error for {path}: {e}[/yellow]")
+                return 0
+
+        # Try each docs folder
+        for folder in docs_folders:
+            docs_dir = output_dir / "docs"
+            docs_dir.mkdir(parents=True, exist_ok=True)
+            count = await fetch_directory(folder, docs_dir)
+            if count > 0:
+                console.print(f"[green]Downloaded {count} docs files via GitHub API[/green]")
+                break
+
+        # Also try to get README
+        for readme in ["README.md", "README.rst", "readme.md"]:
+            url = f"https://raw.githubusercontent.com/{owner}/{repo}/HEAD/{readme}"
+            try:
+                response = await self._get_with_retry(url)
+                if response.status_code == 200:
+                    (output_dir / readme).write_text(response.text)
+                    break
+            except Exception:
+                continue
+
+        return self._collect_doc_files(output_dir)
+
+    async def _fetch_github_file(self, download_url: str, headers: dict) -> str | None:
+        """Download a single file from GitHub."""
+        try:
+            response = await self._get_with_retry(download_url)
+            if response.status_code == 200:
+                return response.text
+        except Exception:
+            pass
+        return None
 
     async def _fetch_readthedocs(self, metadata: ProjectMetadata, output_dir: Path) -> list[Path]:
         """Try to download docs from ReadTheDocs."""
