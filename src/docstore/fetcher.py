@@ -82,6 +82,35 @@ class PyPIFetcher:
                 return project_urls[key]
         return info.get("docs_url")
 
+    def _is_valid_llms_content(self, content: str) -> bool:
+        """
+        Validate that content looks like documentation, not HTML/JSON garbage.
+
+        Many URLs return error pages or redirects as HTML/JSON instead of the
+        expected llms.txt content. This validation prevents indexing such garbage.
+        """
+        start = content[:500].strip().lower()
+
+        # Reject HTML (case-insensitive check on first 500 chars)
+        if start.startswith(("<!doctype", "<html", "<script")):
+            return False
+
+        # Reject JSON
+        stripped = content.strip()
+        if stripped.startswith(("{", "[")):
+            return False
+
+        # Reject JavaScript (check in first 500 chars)
+        if "window." in start or "function(" in start:
+            return False
+
+        # Require documentation structure: headers, code blocks, or multiple paragraphs
+        has_headers = bool(re.search(r"^#+\s+\w", content, re.MULTILINE))
+        has_code = "```" in content
+        has_paragraphs = content.count("\n\n") > 2
+
+        return has_headers or has_code or has_paragraphs
+
     def _is_repo_url(self, url: str) -> bool:
         """Check if URL looks like a repository."""
         if not url:
@@ -125,10 +154,14 @@ class PyPIFetcher:
                 response = await self.client.get(url, follow_redirects=True)
                 if response.status_code == 200:
                     content = response.text
-                    # Basic validation - should have some content
-                    if len(content) > 100:
+                    # Validate content is actual documentation, not HTML/JSON garbage
+                    if len(content) > 100 and self._is_valid_llms_content(content):
                         console.print(f"[green]Found llms.txt at {url}[/green]")
                         return content
+                    elif len(content) > 100:
+                        console.print(
+                            f"[yellow]Skipping {url} - content looks like HTML/JSON, not documentation[/yellow]"
+                        )
             except Exception:
                 continue
 
