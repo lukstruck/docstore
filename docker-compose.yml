@@ -1,0 +1,25 @@
+services:
+  docstore:
+    build: .
+    container_name: docstore
+    ports:
+      - "8420:8420"
+    volumes:
+      - docstore-data:/app/data
+      - docstore-cache:/app/cache
+    environment:
+      - DOCSTORE_DATA_DIR=/app/data
+      - DOCSTORE_CACHE_DIR=/app/cache
+      - DOCSTORE_HOST=0.0.0.0
+      - DOCSTORE_PORT=8420
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8420/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  docstore-data:
+  docstore-cache:
