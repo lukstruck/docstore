@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     request_timeout: float = 30.0
     max_doc_files: int = 500  # Max files to process per project
 
+    # Retry settings for transient network failures
+    max_retries: int = 3
+    retry_backoff_base: float = 1.0  # Initial wait time in seconds
+    retry_backoff_max: float = 10.0  # Maximum wait time between retries
+
+    # GitHub API settings (optional, for higher rate limits)
+    github_token: str | None = None
+
     @property
     def chroma_path(self) -> Path:
         return self.chroma_persist_dir or self.data_dir / "chroma"
