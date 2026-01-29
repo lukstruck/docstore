@@ -2,8 +2,9 @@
 
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class DocSource(str, Enum):
@@ -30,6 +31,19 @@ class ProjectMetadata(BaseModel):
     license: str | None = None
     author: str | None = None
     keywords: list[str] = Field(default_factory=list)
+
+    @field_validator("keywords", mode="before")
+    @classmethod
+    def parse_keywords(cls, v: Any) -> list[str]:
+        """Handle keywords that may be a string, list, or None."""
+        if v is None:
+            return []
+        if isinstance(v, str):
+            # Split comma-separated string
+            return [k.strip() for k in v.split(",") if k.strip()]
+        if isinstance(v, list):
+            return v
+        return []
 
 
 class DocumentChunk(BaseModel):
@@ -81,6 +95,7 @@ class SearchRequest(BaseModel):
     n_results: int = 10
     projects: list[str] | None = None
     tags: list[str] | None = None
+    auto_index: bool = True  # Auto-index missing projects from PyPI
 
 
 class SearchResult(BaseModel):

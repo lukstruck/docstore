@@ -17,6 +17,7 @@ from .models import (
     SearchResponse,
     StatusResponse,
 )
+from .search_service import SearchOptions, SearchService
 from .store import DocStore
 
 console = Console()
@@ -24,16 +25,18 @@ console = Console()
 # Global instances
 store: DocStore | None = None
 indexer: DocIndexer | None = None
+search_service: SearchService | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifecycle."""
-    global store, indexer
+    global store, indexer, search_service
     console.print("[bold green]Starting docstore server...[/bold green]")
 
     store = DocStore()
     indexer = DocIndexer(store)
+    search_service = SearchService(store, indexer)
 
     yield
 
@@ -161,18 +164,45 @@ async def index_requirements(request: IndexRequirementsRequest) -> StatusRespons
 
 @app.post("/search", response_model=SearchResponse)
 async def search(request: SearchRequest) -> SearchResponse:
-    """Search documentation."""
-    if not store:
-        raise HTTPException(status_code=503, detail="Store not initialized")
+    """Search documentation.
 
-    results = store.search(
-        query=request.query,
-        n_results=request.n_results,
-        projects=request.projects,
-        tags=request.tags,
-    )
+    If projects are specified and not indexed, they will be auto-indexed from PyPI
+    (unless auto_index=false).
+    """
+    if not search_service:
+        raise HTTPException(status_code=503, detail="Search service not initialized")
 
-    return SearchResponse(query=request.query, results=results)
+    from .store import ProjectNotFoundError
+
+    try:
+        options = SearchOptions(
+            query=request.query,
+            n_results=request.n_results,
+            projects=request.projects,
+            tags=request.tags,
+            auto_index=request.auto_index,
+        )
+        outcome = await search_service.search(options)
+    except ProjectNotFoundError as e:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "Projects not indexed",
+                "missing_projects": e.projects,
+                "hint": "Use auto_index=true or index the projects first",
+            },
+        )
+
+    if not outcome.results and outcome.failed_to_index:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "Could not index requested projects",
+                "failed": outcome.failed_to_index,
+            },
+        )
+
+    return SearchResponse(query=request.query, results=outcome.results)
 
 
 @app.post("/update/{project}", response_model=StatusResponse)

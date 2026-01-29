@@ -62,7 +62,10 @@ class DocIndexer:
                 source, doc_files = await self.fetcher.fetch_docs(metadata, output_dir)
 
                 if not doc_files:
-                    console.print(f"[yellow]No documentation found for {package}[/yellow]")
+                    console.print(
+                        f"[yellow]Warning: No documentation found for {package}[/yellow]\n"
+                        f"[dim]  No docs from repository, ReadTheDocs, or llms.txt[/dim]"
+                    )
                     # Create minimal entry
                     return ProjectInfo(
                         name=metadata.name,
@@ -73,7 +76,14 @@ class DocIndexer:
                         tags=request.tags,
                     )
 
-                progress.update(task, description=f"Found {len(doc_files)} doc files from {source.value}")
+                # Warn if only PyPI description (limited content)
+                if source == DocSource.PYPI_DESCRIPTION:
+                    console.print(
+                        f"[yellow]Note: Only PyPI description available for {package}[/yellow]\n"
+                        f"[dim]  Search results will be limited. Full docs not accessible.[/dim]"
+                    )
+                else:
+                    progress.update(task, description=f"Found {len(doc_files)} doc files from {source.value}")
 
                 # Convert and chunk
                 progress.update(task, description="Processing documents...")
@@ -117,7 +127,21 @@ class DocIndexer:
             tags=request.tags,
         )
 
-        console.print(f"[green]✓ Indexed {metadata.name} v{metadata.version}: {len(all_chunks)} chunks[/green]")
+        # Final summary with context
+        if source == DocSource.PYPI_DESCRIPTION:
+            console.print(
+                f"[yellow]✓ Indexed {metadata.name} v{metadata.version}: {len(all_chunks)} chunks "
+                f"(PyPI description only)[/yellow]"
+            )
+        elif len(all_chunks) < 5:
+            console.print(
+                f"[yellow]✓ Indexed {metadata.name} v{metadata.version}: {len(all_chunks)} chunks "
+                f"(limited documentation)[/yellow]"
+            )
+        else:
+            console.print(
+                f"[green]✓ Indexed {metadata.name} v{metadata.version}: {len(all_chunks)} chunks[/green]"
+            )
         return project_info
 
     async def index_requirements(

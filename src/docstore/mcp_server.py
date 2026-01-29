@@ -16,7 +16,8 @@ from pydantic import BaseModel
 
 from .indexer import DocIndexer
 from .models import IndexRequest
-from .store import DocStore
+from .search_service import SearchOptions, SearchService
+from .store import DocStore, ProjectNotFoundError
 
 
 class MCPDocStore:
@@ -25,6 +26,7 @@ class MCPDocStore:
     def __init__(self):
         self.store = DocStore()
         self.indexer = DocIndexer(self.store)
+        self.search_service = SearchService(self.store, self.indexer)
         self.server = Server("docstore")
 
         self._setup_handlers()
@@ -38,7 +40,7 @@ class MCPDocStore:
                 tools=[
                     Tool(
                         name="search_docs",
-                        description="Search Python package documentation. Returns relevant chunks with context.",
+                        description="Search Python package documentation. Returns relevant chunks with context. If a project filter is specified and not indexed, it will be auto-indexed from PyPI.",
                         inputSchema={
                             "type": "object",
                             "properties": {
@@ -54,12 +56,17 @@ class MCPDocStore:
                                 "projects": {
                                     "type": "array",
                                     "items": {"type": "string"},
-                                    "description": "Filter to specific projects (optional)",
+                                    "description": "Filter to specific projects. If not indexed, will auto-index from PyPI.",
                                 },
                                 "tags": {
                                     "type": "array",
                                     "items": {"type": "string"},
                                     "description": "Filter by tags (optional)",
+                                },
+                                "auto_index": {
+                                    "type": "boolean",
+                                    "description": "Auto-index missing projects from PyPI (default: true)",
+                                    "default": True,
                                 },
                             },
                             "required": ["query"],
@@ -133,28 +140,49 @@ class MCPDocStore:
                 )
 
     async def _search_docs(self, args: dict[str, Any]) -> CallToolResult:
-        """Handle search_docs tool call."""
-        results = self.store.search(
-            query=args["query"],
-            n_results=args.get("n_results", 5),
-            projects=args.get("projects"),
-            tags=args.get("tags"),
-        )
-
-        if not results:
+        """Handle search_docs tool call with auto-indexing support."""
+        try:
+            options = SearchOptions(
+                query=args["query"],
+                n_results=args.get("n_results", 5),
+                projects=args.get("projects"),
+                tags=args.get("tags"),
+                auto_index=args.get("auto_index", True),
+            )
+            outcome = await self.search_service.search(options)
+        except ProjectNotFoundError as e:
             return CallToolResult(
                 content=[
                     TextContent(
                         type="text",
-                        text=f"No results found for '{args['query']}'. Try indexing more packages with index_package.",
+                        text=f"Projects not indexed: {', '.join(e.projects)}\n"
+                        f"Use index_package to add them or set auto_index=true.",
                     )
                 ]
             )
 
-        # Format results nicely
-        output_parts = [f"Found {len(results)} results for '{args['query']}':\n"]
+        if not outcome.results:
+            msg = f"No results found for '{args['query']}'."
+            if outcome.failed_to_index:
+                failures = [f"{f['project']}: {f['reason']}" for f in outcome.failed_to_index]
+                msg += f"\n\nFailed to index:\n" + "\n".join(failures)
+            else:
+                msg += " Try indexing more packages with index_package."
+            return CallToolResult(content=[TextContent(type="text", text=msg)])
 
-        for i, result in enumerate(results, 1):
+        # Format results nicely
+        output_parts = []
+
+        if outcome.auto_indexed:
+            output_parts.append(f"Auto-indexed: {', '.join(outcome.auto_indexed)}\n")
+
+        if outcome.failed_to_index:
+            failures = [f['project'] for f in outcome.failed_to_index]
+            output_parts.append(f"Could not index: {', '.join(failures)}\n")
+
+        output_parts.append(f"Found {len(outcome.results)} results for '{args['query']}':\n")
+
+        for i, result in enumerate(outcome.results, 1):
             output_parts.append(f"\n--- Result {i} ({result.project} v{result.version}) ---")
             if result.title:
                 output_parts.append(f"Title: {result.title}")

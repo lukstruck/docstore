@@ -12,6 +12,17 @@ from .models import DocumentChunk, DocSource, ProjectInfo, SearchResult
 
 console = Console()
 
+# ChromaDB has a max batch size limit for embeddings
+MAX_BATCH_SIZE = 5000
+
+
+class ProjectNotFoundError(Exception):
+    """Raised when requested projects are not indexed."""
+
+    def __init__(self, projects: list[str]):
+        self.projects = projects
+        super().__init__(f"Projects not indexed: {', '.join(projects)}")
+
 
 class DocStore:
     """ChromaDB-backed storage for documentation chunks."""
@@ -30,31 +41,65 @@ class DocStore:
         self._projects_cache: dict[str, ProjectInfo] | None = None
 
     def add_chunks(self, chunks: list[DocumentChunk]) -> int:
-        """Add document chunks to the store."""
+        """Add document chunks to the store.
+
+        Handles large chunk lists by batching to avoid ChromaDB's batch size limit.
+        """
         if not chunks:
             return 0
 
-        ids = [chunk.id for chunk in chunks]
-        documents = [chunk.content for chunk in chunks]
-        metadatas = [
-            {
-                "project": chunk.project,
-                "version": chunk.version,
-                "source_file": chunk.source_file,
-                "title": chunk.title or "",
-                "chunk_index": chunk.chunk_index,
-                "source": chunk.source.value,
-                "tags": ",".join(chunk.tags),
-                "indexed_at": datetime.now().isoformat(),
-            }
-            for chunk in chunks
-        ]
+        total_chunks = len(chunks)
 
-        # Upsert to handle updates
-        self.collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
+        # Process in batches to avoid ChromaDB's batch size limit
+        for batch_start in range(0, total_chunks, MAX_BATCH_SIZE):
+            batch_end = min(batch_start + MAX_BATCH_SIZE, total_chunks)
+            batch = chunks[batch_start:batch_end]
+
+            if total_chunks > MAX_BATCH_SIZE:
+                console.print(
+                    f"  [dim]Storing batch {batch_start // MAX_BATCH_SIZE + 1}/"
+                    f"{(total_chunks + MAX_BATCH_SIZE - 1) // MAX_BATCH_SIZE} "
+                    f"({len(batch)} chunks)[/dim]"
+                )
+
+            ids = [chunk.id for chunk in batch]
+            documents = [chunk.content for chunk in batch]
+            metadatas = [
+                {
+                    "project": chunk.project,
+                    "version": chunk.version,
+                    "source_file": chunk.source_file,
+                    "title": chunk.title or "",
+                    "chunk_index": chunk.chunk_index,
+                    "source": chunk.source.value,
+                    "tags": ",".join(chunk.tags),
+                    "indexed_at": datetime.now().isoformat(),
+                }
+                for chunk in batch
+            ]
+
+            # Upsert to handle updates
+            self.collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
 
         self._projects_cache = None  # Invalidate cache
-        return len(chunks)
+        return total_chunks
+
+    def _resolve_project_names(self, projects: list[str]) -> tuple[list[str], list[str]]:
+        """Resolve project names with case-insensitive matching.
+
+        Returns (resolved_names, unresolved_names).
+        """
+        indexed = {p.name.lower(): p.name for p in self.list_projects()}
+        resolved = []
+        unresolved = []
+
+        for proj in projects:
+            if proj.lower() in indexed:
+                resolved.append(indexed[proj.lower()])
+            else:
+                unresolved.append(proj)
+
+        return resolved, unresolved
 
     def search(
         self,
@@ -63,8 +108,21 @@ class DocStore:
         projects: list[str] | None = None,
         tags: list[str] | None = None,
     ) -> list[SearchResult]:
-        """Search for relevant documentation chunks."""
-        where_filter = self._build_filter(projects, tags)
+        """Search for relevant documentation chunks.
+
+        Project filtering is case-insensitive.
+        """
+        # Resolve project names (case-insensitive)
+        resolved_projects = None
+        if projects:
+            resolved_projects, unresolved = self._resolve_project_names(projects)
+            if unresolved:
+                # Return unresolved for caller to handle (e.g., auto-index)
+                raise ProjectNotFoundError(unresolved)
+            if not resolved_projects:
+                return []
+
+        where_filter = self._build_filter(resolved_projects, tags)
 
         results = self.collection.query(
             query_texts=[query],

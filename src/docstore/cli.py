@@ -10,7 +10,8 @@ from rich.table import Table
 from .config import settings
 from .indexer import DocIndexer
 from .models import IndexRequest
-from .store import DocStore
+from .search_service import SearchOptions, SearchService
+from .store import DocStore, ProjectNotFoundError
 
 app = typer.Typer(
     name="docstore",
@@ -76,23 +77,56 @@ def search(
     n: int = typer.Option(5, "--n", "-n", help="Number of results"),
     project: list[str] = typer.Option([], "--project", "-p", help="Filter by project"),
     tag: list[str] = typer.Option([], "--tag", "-t", help="Filter by tag"),
+    no_auto_index: bool = typer.Option(False, "--no-auto-index", help="Don't auto-index missing projects"),
 ):
-    """Search indexed documentation."""
-    store = DocStore()
-    results = store.search(
-        query=query,
-        n_results=n,
-        projects=project if project else None,
-        tags=tag if tag else None,
-    )
+    """Search indexed documentation.
 
-    if not results:
-        console.print(f"[yellow]No results found for '{query}'[/yellow]")
+    If a project filter is specified and the project isn't indexed,
+    docstore will automatically try to index it from PyPI.
+    """
+
+    async def _search():
+        store = DocStore()
+        indexer = DocIndexer(store)
+        try:
+            service = SearchService(store, indexer)
+            options = SearchOptions(
+                query=query,
+                n_results=n,
+                projects=project if project else None,
+                tags=tag if tag else None,
+                auto_index=not no_auto_index,
+            )
+            return await service.search(options)
+        finally:
+            await indexer.close()
+
+    try:
+        outcome = _run_async(_search())
+    except ProjectNotFoundError as e:
+        console.print(f"[yellow]Projects not indexed: {', '.join(e.projects)}[/yellow]")
+        console.print("[dim]Tip: Remove --no-auto-index to auto-index from PyPI[/dim]")
         return
 
-    console.print(f"\n[bold]Found {len(results)} results for '{query}'[/bold]\n")
+    # Report auto-indexing results
+    if outcome.auto_indexed:
+        console.print(f"[green]Auto-indexed: {', '.join(outcome.auto_indexed)}[/green]")
 
-    for i, result in enumerate(results, 1):
+    if outcome.failed_to_index:
+        for failure in outcome.failed_to_index:
+            console.print(f"[yellow]Could not index '{failure['project']}': {failure['reason']}[/yellow]")
+
+    if not outcome.results:
+        console.print(f"[yellow]No results found for '{query}'[/yellow]")
+        if project and not no_auto_index:
+            console.print("[dim]Projects may not exist on PyPI or have no accessible docs[/dim]")
+        elif project:
+            console.print("[dim]Tip: Remove --no-auto-index to auto-index from PyPI[/dim]")
+        return
+
+    console.print(f"\n[bold]Found {len(outcome.results)} results for '{query}'[/bold]\n")
+
+    for i, result in enumerate(outcome.results, 1):
         console.print(f"[bold cyan]--- Result {i} ---[/bold cyan]")
         console.print(f"[bold]{result.project}[/bold] v{result.version} | Score: {result.score:.3f}")
         if result.title:

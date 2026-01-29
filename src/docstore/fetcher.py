@@ -247,10 +247,35 @@ class PyPIFetcher:
                         break
 
             except subprocess.TimeoutExpired:
-                console.print("[yellow]Git clone timed out[/yellow]")
+                console.print(
+                    f"[yellow]Warning: Git clone timed out for {repo_url}[/yellow]\n"
+                    f"[dim]  Will fall back to PyPI description[/dim]"
+                )
                 return []
             except subprocess.CalledProcessError as e:
-                console.print(f"[yellow]Git error: {e}[/yellow]")
+                stderr = e.stderr.decode() if e.stderr else ""
+                if "not found" in stderr.lower() or "404" in stderr:
+                    console.print(
+                        f"[yellow]Warning: Repository not found: {repo_url}[/yellow]\n"
+                        f"[dim]  Will fall back to PyPI description[/dim]"
+                    )
+                elif "permission denied" in stderr.lower() or "authentication" in stderr.lower():
+                    console.print(
+                        f"[yellow]Warning: No access to repository: {repo_url}[/yellow]\n"
+                        f"[dim]  Repository may be private. Will fall back to PyPI description[/dim]"
+                    )
+                else:
+                    console.print(
+                        f"[yellow]Warning: Could not clone {repo_url}[/yellow]\n"
+                        f"[dim]  {stderr.strip() if stderr else 'Unknown git error'}[/dim]\n"
+                        f"[dim]  Will fall back to PyPI description[/dim]"
+                    )
+                return []
+            except Exception as e:
+                console.print(
+                    f"[yellow]Warning: Unexpected error cloning {repo_url}: {e}[/yellow]\n"
+                    f"[dim]  Will fall back to PyPI description[/dim]"
+                )
                 return []
 
         # Collect all doc files
