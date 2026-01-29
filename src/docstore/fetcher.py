@@ -9,11 +9,35 @@ from urllib.parse import urlparse
 
 import httpx
 from rich.console import Console
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from .config import settings
 from .models import DocSource, ProjectMetadata
 
 console = Console()
+
+
+def _create_http_retry():
+    """
+    Create a retry decorator for HTTP operations.
+
+    Retries on transient network failures (timeouts, connection errors)
+    with exponential backoff.
+    """
+    return retry(
+        stop=stop_after_attempt(settings.max_retries),
+        wait=wait_exponential(
+            multiplier=settings.retry_backoff_base,
+            max=settings.retry_backoff_max,
+        ),
+        retry=retry_if_exception_type((httpx.TimeoutException, httpx.ConnectError)),
+        reraise=True,
+    )
 
 
 class PyPIFetcher:
@@ -27,13 +51,18 @@ class PyPIFetcher:
     async def close(self):
         await self.client.aclose()
 
+    @_create_http_retry()
+    async def _get_with_retry(self, url: str, **kwargs) -> httpx.Response:
+        """HTTP GET with automatic retry on transient failures."""
+        return await self.client.get(url, **kwargs)
+
     async def get_metadata(self, package: str, version: str | None = None) -> ProjectMetadata:
-        """Fetch package metadata from PyPI."""
+        """Fetch package metadata from PyPI with automatic retry on network failures."""
         url = f"{self.PYPI_API}/{package}/json"
         if version:
             url = f"{self.PYPI_API}/{package}/{version}/json"
 
-        response = await self.client.get(url)
+        response = await self._get_with_retry(url)
         response.raise_for_status()
         data = response.json()
 
@@ -151,7 +180,7 @@ class PyPIFetcher:
 
         for url in urls_to_try:
             try:
-                response = await self.client.get(url, follow_redirects=True)
+                response = await self._get_with_retry(url, follow_redirects=True)
                 if response.status_code == 200:
                     content = response.text
                     # Validate content is actual documentation, not HTML/JSON garbage
@@ -162,6 +191,10 @@ class PyPIFetcher:
                         console.print(
                             f"[yellow]Skipping {url} - content looks like HTML/JSON, not documentation[/yellow]"
                         )
+            except (httpx.TimeoutException, httpx.ConnectError) as e:
+                # Retry exhausted, log and continue to next URL
+                console.print(f"[yellow]Network error fetching {url}: {e}[/yellow]")
+                continue
             except Exception:
                 continue
 
@@ -336,7 +369,7 @@ class PyPIFetcher:
 
         for url in download_urls:
             try:
-                response = await self.client.get(url, follow_redirects=True)
+                response = await self._get_with_retry(url, follow_redirects=True)
                 if response.status_code == 200:
                     zip_path = output_dir / "docs.zip"
                     zip_path.write_bytes(response.content)
@@ -349,6 +382,9 @@ class PyPIFetcher:
 
                     console.print("[green]Downloaded ReadTheDocs HTML[/green]")
                     return self._collect_doc_files(output_dir)
+            except (httpx.TimeoutException, httpx.ConnectError) as e:
+                console.print(f"[yellow]RTD download failed after retries: {e}[/yellow]")
+                continue
             except Exception as e:
                 console.print(f"[yellow]RTD download failed: {e}[/yellow]")
                 continue
