@@ -1,0 +1,104 @@
+{
+  "metadata": {
+    "version": "1.0",
+    "description": "Evaluation scenarios for docstore vs Context7"
+  },
+  "easy_problems": [
+    {
+      "id": "easy_1",
+      "name": "CSV to JSON with Validation",
+      "libraries": ["pydantic", "polars"],
+      "queries": [
+        {"query": "BaseModel field_validator custom validation", "library": "pydantic", "expected_apis": ["field_validator", "BaseModel"]},
+        {"query": "read_csv scan_csv LazyFrame", "library": "polars", "expected_apis": ["read_csv", "scan_csv", "LazyFrame"]},
+        {"query": "model_dump_json serialize", "library": "pydantic", "expected_apis": ["model_dump_json"]}
+      ]
+    },
+    {
+      "id": "easy_2",
+      "name": "Async HTTP Client with Retry",
+      "libraries": ["aiohttp", "tenacity"],
+      "queries": [
+        {"query": "ClientSession get post request async", "library": "aiohttp", "expected_apis": ["ClientSession", "get", "post"]},
+        {"query": "retry exponential backoff decorator", "library": "tenacity", "expected_apis": ["retry", "wait_exponential", "stop_after_attempt"]}
+      ]
+    },
+    {
+      "id": "easy_3",
+      "name": "CLI Tool with Colored Output",
+      "libraries": ["typer", "rich"],
+      "queries": [
+        {"query": "Typer command argument option CLI", "library": "typer", "expected_apis": ["Typer", "command", "Argument", "Option"]},
+        {"query": "console print style color", "library": "rich", "expected_apis": ["Console", "print", "style"]},
+        {"query": "progress bar track", "library": "rich", "expected_apis": ["Progress", "track"]}
+      ]
+    },
+    {
+      "id": "easy_4",
+      "name": "Image Thumbnail Generator",
+      "libraries": ["pillow"],
+      "queries": [
+        {"query": "Image open thumbnail resize save", "library": "pillow", "expected_apis": ["Image.open", "thumbnail", "save"]}
+      ]
+    },
+    {
+      "id": "easy_5",
+      "name": "YAML Config with Environment Variables",
+      "libraries": ["pyyaml", "python-dotenv"],
+      "queries": [
+        {"query": "safe_load parse yaml", "library": "pyyaml", "expected_apis": ["safe_load", "SafeLoader"]},
+        {"query": "load_dotenv environment variables", "library": "python-dotenv", "expected_apis": ["load_dotenv", "dotenv_values"]}
+      ]
+    }
+  ],
+  "hard_problems": [
+    {
+      "id": "hard_1",
+      "name": "Full-Stack Async Web App",
+      "libraries": ["fastapi", "sqlalchemy", "passlib", "python-jose", "celery"],
+      "queries": [
+        {"query": "Depends dependency injection async", "library": "fastapi", "expected_apis": ["Depends"]},
+        {"query": "async session create_async_engine AsyncSession", "library": "sqlalchemy", "expected_apis": ["create_async_engine", "AsyncSession"]},
+        {"query": "CryptContext hash verify password", "library": "passlib", "expected_apis": ["CryptContext", "hash", "verify"]},
+        {"query": "jwt encode decode token", "library": "python-jose", "expected_apis": ["encode", "decode"]},
+        {"query": "task decorator async celery", "library": "celery", "expected_apis": ["task", "Celery"]}
+      ]
+    },
+    {
+      "id": "hard_2",
+      "name": "ML Pipeline",
+      "libraries": ["optuna", "mlflow"],
+      "queries": [
+        {"query": "create_study optimize hyperparameter", "library": "optuna", "expected_apis": ["create_study", "optimize"]},
+        {"query": "start_run log_metric experiment tracking", "library": "mlflow", "expected_apis": ["start_run", "log_metric"]}
+      ]
+    },
+    {
+      "id": "hard_3",
+      "name": "Kubernetes Operator",
+      "libraries": ["kopf", "kubernetes", "boto3"],
+      "queries": [
+        {"query": "on.create on.update handler operator", "library": "kopf", "expected_apis": ["on.create", "on.update"]},
+        {"query": "s3 client upload download bucket", "library": "boto3", "expected_apis": ["client", "upload_file", "download_file"]}
+      ]
+    },
+    {
+      "id": "hard_4",
+      "name": "Real-Time Data Pipeline",
+      "libraries": ["confluent-kafka", "asyncpg", "polars"],
+      "queries": [
+        {"query": "Consumer Producer subscribe poll message", "library": "confluent-kafka", "expected_apis": ["Consumer", "Producer", "poll"]},
+        {"query": "connect execute query async", "library": "asyncpg", "expected_apis": ["connect", "execute", "fetch"]}
+      ]
+    },
+    {
+      "id": "hard_5",
+      "name": "Multi-Tenant SaaS",
+      "libraries": ["stripe", "sendgrid", "weasyprint"],
+      "queries": [
+        {"query": "Subscription create webhook payment", "library": "stripe", "expected_apis": ["Subscription.create", "Webhook"]},
+        {"query": "HTML write_pdf generate", "library": "weasyprint", "expected_apis": ["HTML", "write_pdf"]}
+      ]
+    }
+  ]
+}
