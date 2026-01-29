@@ -161,6 +161,10 @@ Environment variables (prefix with `DOCSTORE_`):
 | `PORT` | `8420` | HTTP server port |
 | `CHUNK_SIZE` | `1000` | Characters per chunk |
 | `CHUNK_OVERLAP` | `200` | Overlap between chunks |
+| `MAX_RETRIES` | `3` | Retry attempts for network failures |
+| `RETRY_BACKOFF_BASE` | `1.0` | Initial retry delay (seconds) |
+| `RETRY_BACKOFF_MAX` | `10.0` | Maximum retry delay (seconds) |
+| `GITHUB_TOKEN` | `None` | GitHub API token (optional, for higher rate limits) |
 
 Or create a `.env` file:
 
@@ -203,15 +207,26 @@ volumes:
 ## How It Works
 
 1. **Fetch**: Looks up package on PyPI, finds repo/docs URL
-2. **Download**: Tries in order:
-   - `llms.txt` / `llms-full.txt` (emerging LLM-friendly docs standard)
-   - Git sparse checkout of `/docs` folder
+2. **Download**: Tries in order (with automatic retry on network failures):
+   - `llms.txt` / `llms-full.txt` (validated to reject HTML/JSON garbage)
+   - Git sparse checkout of `/docs` folder (falls back to GitHub API if git fails)
    - ReadTheDocs HTML download
    - PyPI description fallback
 3. **Convert**: RST/HTML → Markdown (uses pandoc if available)
 4. **Chunk**: Semantic splitting by headers, then by size
 5. **Embed**: ChromaDB handles embedding via default model
 6. **Store**: Persisted to disk with project/version/tag metadata
+
+## Evaluation
+
+The `evaluation/` directory contains test scenarios for comparing docstore performance:
+
+```bash
+# Run evaluation (outputs docstore results for all scenarios)
+uv run python evaluation/evaluate.py
+```
+
+Scenarios are defined in `evaluation/scenarios.json` covering common Python libraries.
 
 ## Development
 
