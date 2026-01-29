@@ -105,6 +105,130 @@
 
 ---
 
+## Detailed Relevance Analysis
+
+### Docstore Result Categories
+
+#### Highly Relevant (answered the query directly with code) - 6/26 (23%)
+
+| Query | Score | What Was Returned |
+|-------|-------|-------------------|
+| polars scan_csv | 0.616 | Actual scan_csv/LazyFrame docs with code examples |
+| pillow thumbnail | 0.632 | Complete working thumbnail script |
+| python-jose jwt | 0.653 | Exact encode/decode code example |
+| boto3 s3 | 0.667 | download_file, upload_file with code |
+| weasyprint write_pdf | 0.613 | HTML.write_pdf() examples |
+| python-dotenv | 0.786 | load_dotenv, dotenv_values examples |
+
+#### Relevant but Limited (conceptual, missing code examples) - 7/26 (27%)
+
+| Query | Score | What Was Returned |
+|-------|-------|-------------------|
+| aiohttp ClientSession | 0.482 | Streaming uploads concept, partial examples |
+| typer CLI | 0.793 | Tutorial about Option/Argument, but brief |
+| rich console | 0.714 | Style definitions, color examples |
+| rich progress | 0.582 | Nesting progress bars concept |
+| fastapi Depends | 0.557 | Dependency injection explanation |
+| mlflow log_metric | 0.607 | Tracking quickstart overview |
+| confluent-kafka | 0.452 | Basic consumer example |
+
+#### Partially Relevant (description only, no real docs) - 4/26 (15%)
+
+| Query | Score | What Was Returned |
+|-------|-------|-------------------|
+| tenacity retry | 0.643 | Feature list: "exponential backoff sleeping" - no code |
+| passlib CryptContext | 0.511 | "comprehensive password hashing framework" |
+| celery task | 0.630 | "Distributed Task Queue" description |
+| optuna create_study | 0.502 | "hyperparameter optimization framework" |
+
+#### Irrelevant or Garbage - 7/26 (27%)
+
+| Query | Score | What Was Returned |
+|-------|-------|-------------------|
+| pydantic field_validator | 0.344 | Generic "Data validation using Python type hints" - no field_validator info |
+| pydantic model_dump_json | 0.146 | Same generic description |
+| pyyaml safe_load | 0.422 | README links to external docs, no actual safe_load info |
+| kopf on.create | 0.101 | "Kubernetes Operator Pythonic Framework" - no handler info |
+| sqlalchemy async | 0.128 | **HTML/JavaScript garbage** from Cloudflare |
+| stripe subscription | 0.496 | **Escaped JSON/markdoc** - unreadable |
+| asyncpg | - | **No results at all** |
+
+### Context7 Result Categories
+
+#### Highly Relevant - 25/26 (96%)
+
+Every successful Context7 result included:
+- Working code examples
+- Full API signatures with parameters
+- Multiple usage patterns
+- Error handling examples
+
+#### Failed - 1/26 (4%)
+
+| Query | Issue |
+|-------|-------|
+| optuna (first attempt) | Temporary network error, succeeded on retry |
+
+### Noise/Irrelevant Content Ratio
+
+| Tool | Clean Results | Noisy/Partial | Garbage | No Results |
+|------|---------------|---------------|---------|------------|
+| **Docstore** | 50% (13/26) | 15% (4/26) | 27% (7/26) | 8% (2/26) |
+| **Context7** | 96% (25/26) | 0% | 0% | 4% (1/26) |
+
+### Examples of Noise in Docstore Results
+
+**SQLAlchemy returned HTML/JavaScript instead of docs:**
+```
+<script type="text/javascript" src="_static/searchtools.js"></script>
+<script type="text/javascript" src="//www.sqlalchemy.org/js/bootstrap.bundle.min.js">
+```
+
+**Stripe returned escaped JSON/markdoc:**
+```
+{"\u0024\u0024mdtype":"Tag","name":"Link","attributes":{"href":"https:\u002F\u002F...
+```
+
+**Tenacity returned feature list instead of code:**
+```
+- Generic Decorator API
+- Specify stop condition (i.e. limit by number of attempts)
+- Specify wait condition (i.e. exponential backoff sleeping between attempts)
+```
+
+### Side-by-Side Comparison Example
+
+**Query: pydantic field_validator**
+
+**Docstore returned:**
+```
+Data validation using Python type hints
+
+**Documentation**: https://docs.pydantic.dev
+**Repository**: https://github.com/pydantic/pydantic
+```
+
+**Context7 returned:**
+```python
+from pydantic import BaseModel, ValidationError, field_validator
+
+class UserModel(BaseModel):
+    name: str
+
+    @field_validator('name')
+    @classmethod
+    def name_must_contain_space(cls, v: str) -> str:
+        if ' ' not in v:
+            raise ValueError('must contain a space')
+        return v.title()
+```
+
+### Key Insight
+
+**Semantic search scores don't correlate with usefulness.** Tenacity scored 0.643 but returned no usable code. The score reflects text similarity, not whether the result actually answers the query.
+
+---
+
 ## Key Observations from Latest Run
 
 ### Docstore Strengths
